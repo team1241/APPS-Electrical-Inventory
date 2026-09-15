@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 106, "column": 0}, "map": {"version":3,"sources":["file:///C:/Users/aesha/OneDrive/Documents/GitHub/APPS-Electrical-Inventory/src/proxy.ts"],"sourcesContent":["import type { NextRequest } from \"next/server\";\r\nimport { NextResponse } from \"next/server\";\r\n\r\nexport default function proxy(request: NextRequest) {\r\n  return NextResponse.next();\r\n}\r\n\r\nexport const config = {\r\n  matcher: [\r\n    \"/((?!_next|[^?]*\\\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)\",\r\n    \"/(api|trpc)(.*)\",\r\n  ],\r\n};\r\n"],"names":["proxy","request","next","config","matcher"],"mappings":";;;;;;AACA;;AAEe,SAASA,MAAMC,OAAoB;IAChD,OAAO,8IAAY,CAACC,IAAI;AAC1B;AAEO,MAAMC,SAAS;IACpBC,SAAS;QACP;QACA;KACD;AACH"}}]
+}
