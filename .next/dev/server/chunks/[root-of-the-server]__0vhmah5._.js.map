@@ -1,6 +1,0 @@
-{
-  "version": 3,
-  "sources": [],
-  "sections": [
-    {"offset": {"line": 88, "column": 0}, "map": {"version":3,"sources":["file:///C:/Users/aesha/OneDrive/Documents/GitHub/APPS-Electrical-Inventory/src/proxy.ts"],"sourcesContent":["export default undefined;\r\n\r\nexport const config = {\r\n  matcher: [\r\n    \"/((?!_next|[^?]*\\\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)\",\r\n    \"/(api|trpc)(.*)\",\r\n  ],\r\n};\r\n"],"names":["undefined","config","matcher"],"mappings":";;;;;;uCAAeA;AAER,MAAMC,SAAS;IACpBC,SAAS;QACP;QACA;KACD;AACH"}}]
-}
