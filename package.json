@@ -6,10 +6,10 @@
     "@vitest/browser-playwright": "4.1.11"
   },
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --hostname localhost",
     "build": "next build",
     "start": "next start",
-    "lint": "biome check src",
+    "lint": "biome lint src",
     "format": "biome format --write src",
     "check": "ultracite check src",
     "fix": "ultracite fix src",
