@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <title>Volt Inventory</title>
-  <rect width="64" height="64" rx="13" fill="#101b32"/>
-  <path d="M36 8 15 36h17l-3 20 22-31H35l1-17Z" fill="#e96f32"/>
+  <title>1241 Electrical Inventory</title>
+  <rect width="64" height="64" rx="10" fill="#071d45"/>
+  <path d="M37 6 15 36h14l-3 22 23-33H34Z" fill="#75c7f3"/>
 </svg>
