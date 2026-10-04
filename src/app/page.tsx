@@ -120,778 +120,544 @@ function ItemImage({ item, small = false }: { item: Item; small?: boolean }) {
 }
 
 export default function Home() {
-	return (
-		<Show
-			when="signed-in"
-			fallback={
-				<div className="signin-screen">
-					<div className="signin-card">
-						<div className="brand-mark">
-							<Icon name="bolt" size={24} />
-						</div>
-						<span className="eyebrow">ELECTRICAL INVENTORY</span>
-						<h1>Know what you have. Find what you need.</h1>
-						<p>
-							Keep your parts, locations, and stock levels organized in one easy
-							place. Sign in or create an account above to continue.
-						</p>
-					</div>
-				</div>
-			}
-		>
-			<Authenticated>
-				<InventoryDashboard />
-			</Authenticated>
-			<AuthLoading>
-				<div className="signin-screen">
-					<div className="signin-card">
-						<div className="brand-mark">
-							<Icon name="bolt" size={24} />
-						</div>
-						<h1>Connecting to inventory</h1>
-						<p>Verifying your sign-in…</p>
-					</div>
-				</div>
-			</AuthLoading>
-			<Unauthenticated>
-				<div className="signin-screen">
-					<div className="signin-card">
-						<div className="brand-mark">
-							<Icon name="bolt" size={24} />
-						</div>
-						<h1>Inventory access unavailable</h1>
-						<p>
-							Your sign-in could not be verified for inventory. Refresh the page;
-							if this continues, check the Clerk and Convex connection.
-						</p>
-					</div>
-				</div>
-			</Unauthenticated>
-		</Show>
-	);
-}
+  const items = useQuery(api.inventory.list, {});
+  const categoryRecords = useQuery(api.inventoryCategories.list, {});
+  const ensureDefaultCategories = useMutation(api.inventoryCategories.ensureDefaults);
+  const createItem = useMutation(api.inventory.create);
+  const updateItem = useMutation(api.inventory.update);
+  const adjustQuantity = useMutation(api.inventory.adjustQuantity);
+  const removeItem = useMutation(api.inventory.remove);
+  const createCategory = useMutation(api.inventoryCategories.create);
+  const renameCategory = useMutation(api.inventoryCategories.rename);
+  const removeCategory = useMutation(api.inventoryCategories.remove);
 
-function InventoryDashboard() {
-	const [view, setView] = useState<"all" | "low">("all");
-	const [category, setCategory] = useState<Category | "">("");
-	const [searchInput, setSearchInput] = useState("");
-	const [search, setSearch] = useState("");
-	const [showAdd, setShowAdd] = useState(false);
-	const [adjustItem, setAdjustItem] = useState<Item | null>(null);
-	const [pendingItem, setPendingItem] = useState<string | null>(null);
-	const [error, setError] = useState("");
-	const adjustStock = useMutation(api.items.adjustStock);
-	const lowPreview = useQuery(api.items.lowPreview);
-	const { results, status, loadMore } = usePaginatedQuery(
-		api.items.list,
-		{ category: category || undefined, lowOnly: view === "low", search },
-		{ initialNumItems: 24 },
-	);
-	useEffect(() => {
-		const timer = setTimeout(() => setSearch(searchInput.trim()), 250);
-		return () => clearTimeout(timer);
-	}, [searchInput]);
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("All supplies");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [activeTab, setActiveTab] = useState<"inventory" | "reorder">("inventory");
+  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<InventoryCategory | null>(null);
+  const [editedCategoryName, setEditedCategoryName] = useState("");
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [categoryError, setCategoryError] = useState("");
+  const [isCategorySaving, setIsCategorySaving] = useState(false);
+  const [draft, setDraft] = useState<ItemDraft>(emptyDraft);
+  const [formError, setFormError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const categorySeedRequested = useRef(false);
 
-	async function quickAdjust(item: Item, amount: number) {
-		setError("");
-		setPendingItem(item._id);
-		try {
-			await adjustStock({ itemId: item._id, amount });
-		} catch (cause) {
-			setError(
-				cause instanceof Error ? cause.message : "Could not update stock.",
-			);
-		} finally {
-			setPendingItem(null);
-		}
-	}
+  useEffect(() => {
+    if (!categoryRecords || categoryRecords.length > 0 || categorySeedRequested.current) return;
+    categorySeedRequested.current = true;
+    void ensureDefaultCategories({}).catch((error: unknown) => {
+      setNotice(error instanceof Error ? error.message : "Could not load supply categories.");
+    });
+  }, [categoryRecords, ensureDefaultCategories]);
 
-	return (
-		<div className="app-shell">
-			<aside className="sidebar">
-				<div className="brand">
-					<span className="brand-mark">
-						<Icon name="bolt" size={23} />
-					</span>
-					<div>
-						<strong>VOLT</strong>
-						<small>INVENTORY</small>
-					</div>
-				</div>
-				<div className="sidebar-section-label">WORKSPACE</div>
-				<nav aria-label="Main navigation" className="side-nav">
-					<button
-						className={view === "all" ? "active" : ""}
-						onClick={() => setView("all")}
-						type="button"
-					>
-						<Icon name="grid" size={18} /> All inventory
-					</button>
-					<button
-						className={view === "low" ? "active" : ""}
-						onClick={() => setView("low")}
-						type="button"
-					>
-						<Icon name="alert" size={18} /> Low stock{" "}
-						{lowPreview && lowPreview.length > 0 && (
-							<span className="nav-dot" />
-						)}
-					</button>
-				</nav>
-				<div className="sidebar-bottom">
-					<div className="sidebar-tip">
-						<span className="tip-icon">
-							<Icon name="box" size={18} />
-						</span>
-						<strong>Stay stocked.</strong>
-						<p>
-							Set a low-stock level for each part and see what needs attention.
-						</p>
-					</div>
-					<div className="sidebar-user">
-						<span className="workspace-avatar">V</span>
-						<div>
-							<strong>Your workspace</strong>
-							<span>Inventory manager</span>
-						</div>
-					</div>
-				</div>
-			</aside>
-			<main className="main-content">
-				<div className="topbar">
-					<span>
-						WORKSPACE <span className="slash">/</span>{" "}
-						{view === "all" ? "INVENTORY" : "LOW STOCK"}
-					</span>
-					<div className="topbar-right">
-						<span className="live-dot" /> LIVE INVENTORY{" "}
-					</div>
-				</div>
-				<div className="content-inner">
-					<div className="page-heading">
-						<div>
-							<span className="eyebrow">YOUR PARTS, ALL IN ONE PLACE</span>
-							<h1>{view === "all" ? "Inventory overview" : "Low stock"}</h1>
-							<p>
-								{view === "all"
-									? "A clear view of every electrical part you keep on hand."
-									: "Parts at or below their reorder level."}
-							</p>
-						</div>
-						<button
-							className="primary-button"
-							onClick={() => setShowAdd(true)}
-							type="button"
-						>
-							<Icon name="plus" size={18} /> Add new item
-						</button>
-					</div>
-					{view === "all" && (
-						<section className="attention-panel">
-							<div className="attention-copy">
-								<span className="attention-icon">
-									<Icon name="alert" size={19} />
-								</span>
-								<div>
-									<span className="attention-kicker">STOCK WATCH</span>
-									<h2>
-										{lowPreview === undefined
-											? "Checking stock levels…"
-											: lowPreview.length
-												? "A few parts need your attention"
-												: "Everything is looking good"}
-									</h2>
-									<p>
-										{lowPreview?.length
-											? "These parts are at or below their low-stock threshold."
-											: "Parts that run low will appear here automatically."}
-									</p>
-									{lowPreview && lowPreview.length > 0 && (
-										<div className="low-preview-list">
-											{lowPreview.slice(0, 3).map((item) => (
-												<span key={item._id}>
-													{item.commonName}{" "}
-													<strong>{item.quantity} left</strong>
-												</span>
-											))}
-										</div>
-									)}
-								</div>
-							</div>
-							{lowPreview && lowPreview.length > 0 && (
-								<button
-									className="text-link"
-									onClick={() => setView("low")}
-									type="button"
-								>
-									View low stock <Icon name="arrow" size={16} />
-								</button>
-							)}
-						</section>
-					)}
-					<section aria-label="Inventory items" className="inventory-card">
-						<div className="card-header">
-							<div>
-								<span className="eyebrow">PARTS CATALOG</span>
-								<h2>{view === "all" ? "All inventory" : "Needs restocking"}</h2>
-							</div>
-							<span className="result-count">
-								{results.length} {status === "Exhausted" ? "items" : "shown"}
-							</span>
-						</div>
-						<div className="toolbar">
-							<label className="search-box">
-								<Icon name="search" size={18} />
-								<input
-									aria-label="Search by name or SKU"
-									onChange={(event) => setSearchInput(event.target.value)}
-									placeholder="Search by name or SKU..."
-									type="search"
-									value={searchInput}
-								/>
-							</label>
-							<label className="filter-box">
-								<span>Category</span>
-								<select
-									aria-label="Filter by category"
-									onChange={(event) =>
-										setCategory(event.target.value as Category | "")
-									}
-									value={category}
-								>
-									<option value="">All categories</option>
-									{CATEGORIES.map((value) => (
-										<option key={value} value={value}>
-											{value}
-										</option>
-									))}
-								</select>
-							</label>
-						</div>
-						{error && (
-							<div className="inline-error" role="alert">
-								{error}
-								<button
-									aria-label="Dismiss error"
-									onClick={() => setError("")}
-									type="button"
-								>
-									<Icon name="close" size={16} />
-								</button>
-							</div>
-						)}
-						<div className="table-scroll">
-							<table className="inventory-table">
-								<thead>
-									<tr>
-										<th>ITEM</th>
-										<th>CATEGORY</th>
-										<th>LOCATION</th>
-										<th>ON HAND</th>
-										<th>STATUS</th>
-										<th className="actions-col">QUICK ADJUST</th>
-									</tr>
-								</thead>
-								<tbody>
-									{results.map((item) => (
-										<tr key={item._id}>
-											<td>
-												<div className="item-cell">
-													<ItemImage item={item} />
-													<div>
-														<strong>{item.commonName}</strong>
-														<span>{item.sku}</span>
-													</div>
-												</div>
-											</td>
-											<td>
-												<span className="category-text">{item.category}</span>
-											</td>
-											<td>
-												<span className="location-text">{item.location}</span>
-											</td>
-											<td>
-												<div className="quantity-cell">
-													<strong>{item.quantity.toLocaleString()}</strong>
-													<span>min. {item.lowThreshold.toLocaleString()}</span>
-												</div>
-											</td>
-											<td>
-												<span
-													className={`status-pill ${item.isLow ? "status-low" : "status-good"}`}
-												>
-													<i />
-													{item.isLow ? "Low stock" : "In stock"}
-												</span>
-											</td>
-											<td>
-												<div className="adjust-actions">
-													<button
-														aria-label={`Remove one ${item.commonName}`}
-														disabled={
-															pendingItem === item._id || item.quantity === 0
-														}
-														onClick={() => quickAdjust(item, -1)}
-														type="button"
-													>
-														<Icon name="minus" size={16} />
-													</button>
-													<button
-														aria-label={`Add one ${item.commonName}`}
-														disabled={pendingItem === item._id}
-														onClick={() => quickAdjust(item, 1)}
-														type="button"
-													>
-														<Icon name="plus" size={16} />
-													</button>
-													<button
-														className="adjust-custom"
-														disabled={pendingItem === item._id}
-														onClick={() => setAdjustItem(item)}
-														type="button"
-													>
-														Custom
-													</button>
-												</div>
-											</td>
-										</tr>
-									))}
-								</tbody>
-							</table>
-						</div>
-						{status === "LoadingFirstPage" && (
-							<div className="empty-state">
-								<span className="empty-icon">
-									<Icon name="box" size={30} />
-								</span>
-								<h3>Loading inventory…</h3>
-							</div>
-						)}
-						{status !== "LoadingFirstPage" && results.length === 0 && (
-							<div className="empty-state">
-								<span className="empty-icon">
-									<Icon name={view === "low" ? "check" : "box"} size={30} />
-								</span>
-								<h3>
-									{search || category
-										? "No parts found"
-										: view === "low"
-											? "No parts are low in stock"
-											: "Your inventory starts here"}
-								</h3>
-								<p>
-									{search || category
-										? "Try a different search or category."
-										: view === "low"
-											? "You’re all caught up for now."
-											: "Add your first electrical part to start tracking stock."}
-								</p>
-								{!search && !category && view === "all" && (
-									<button
-										className="primary-button"
-										onClick={() => setShowAdd(true)}
-										type="button"
-									>
-										<Icon name="plus" size={17} /> Add first item
-									</button>
-								)}
-							</div>
-						)}
-						{(status === "CanLoadMore" || status === "LoadingMore") && (
-							<div className="load-more">
-								<button
-									disabled={status === "LoadingMore"}
-									onClick={() => loadMore(24)}
-									type="button"
-								>
-									{status === "LoadingMore" ? "Loading…" : "Load more items"}
-								</button>
-							</div>
-						)}
-					</section>
-					<footer className="page-footer">
-						VOLT INVENTORY <span>·</span> Keep every part accounted for.
-					</footer>
-				</div>
-			</main>
-			{showAdd && <AddItemModal onClose={() => setShowAdd(false)} />}
-			{adjustItem && (
-				<AdjustModal item={adjustItem} onClose={() => setAdjustItem(null)} />
-			)}
-		</div>
-	);
-}
+  const inventory = items ?? [];
+  const lowStockCount = inventory.filter((item) => itemStatus(item) === "low").length;
+  const outOfStockCount = inventory.filter((item) => itemStatus(item) === "out").length;
+  const totalUnits = inventory.reduce((sum, item) => sum + item.quantity, 0);
+  const categoryCounts = inventory.reduce<Record<string, number>>((counts, item) => {
+    counts[item.category] = (counts[item.category] ?? 0) + 1;
+    return counts;
+  }, {});
+  const categories = [...new Set([
+    ...(categoryRecords?.length ? categoryRecords.map((category) => category.name) : defaultCategories),
+    ...inventory.map((item) => item.category),
+  ])];
+  const filteredItems = inventory.filter((item) => {
+    const query = search.trim().toLowerCase();
+    const matchesSearch =
+      !query ||
+      [item.sku, item.name, item.category, item.location, item.supplier ?? ""]
+        .join(" ")
+        .toLowerCase()
+        .includes(query);
+    const matchesCategory = categoryFilter === "All supplies" || item.category === categoryFilter;
+    const status = itemStatus(item);
+    const matchesStatus = activeTab === "inventory"
+      ? statusFilter === "all" || statusFilter === status
+      : status !== "good" && (statusFilter === "all" || statusFilter === status);
+    return matchesSearch && matchesCategory && matchesStatus;
+  });
 
-function ModalFrame({
-	title,
-	subtitle,
-	onClose,
-	children,
-}: {
-	title: string;
-	subtitle: string;
-	onClose: () => void;
-	children: ReactNode;
-}) {
-	useEffect(() => {
-		function onKeyDown(event: KeyboardEvent) {
-			if (event.key === "Escape") onClose();
-		}
-		window.addEventListener("keydown", onKeyDown);
-		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [onClose]);
-	return (
-		<div className="modal-backdrop">
-			<div
-				aria-labelledby="inventory-modal-title"
-				aria-modal="true"
-				className="modal-card"
-				role="dialog"
-			>
-				<div className="modal-header">
-					<div>
-						<span className="eyebrow">INVENTORY MANAGEMENT</span>
-						<h2 id="inventory-modal-title">{title}</h2>
-						<p>{subtitle}</p>
-					</div>
-					<button
-						aria-label="Close dialog"
-						className="close-button"
-						onClick={onClose}
-						type="button"
-					>
-						<Icon name="close" size={20} />
-					</button>
-				</div>
-				{children}
-			</div>
-		</div>
-	);
-}
+  const reorderCount = lowStockCount + outOfStockCount;
 
-function AddItemModal({ onClose }: { onClose: () => void }) {
-	const createItem = useMutation(api.items.create);
-	const generateUploadUrl = useMutation(api.items.generateUploadUrl);
-	const [commonName, setCommonName] = useState("");
-	const [sku, setSku] = useState("");
-	const [category, setCategory] = useState<Category>("Terminals & Crimps");
-	const [location, setLocation] = useState("");
-	const [quantity, setQuantity] = useState("0");
-	const [lowThreshold, setLowThreshold] = useState("10");
-	const [photo, setPhoto] = useState<File | null>(null);
-	const [preview, setPreview] = useState("");
-	const [saving, setSaving] = useState(false);
-	const [error, setError] = useState("");
-	useEffect(() => {
-		if (!photo) {
-			setPreview("");
-			return;
-		}
-		const url = URL.createObjectURL(photo);
-		setPreview(url);
-		return () => URL.revokeObjectURL(url);
-	}, [photo]);
-	async function onSubmit(event: FormEvent<HTMLFormElement>) {
-		event.preventDefault();
-		setError("");
-		const parsedQuantity = Number(quantity);
-		const parsedThreshold = Number(lowThreshold);
-		if (
-			!Number.isSafeInteger(parsedQuantity) ||
-			parsedQuantity < 0 ||
-			!Number.isSafeInteger(parsedThreshold) ||
-			parsedThreshold < 0
-		) {
-			setError(
-				"Quantity and low-stock level must be whole numbers of zero or more.",
-			);
-			return;
-		}
-		setSaving(true);
-		try {
-			let imageId: Id<"_storage"> | undefined;
-			if (photo) {
-				const uploadUrl = await generateUploadUrl({});
-				const response = await fetch(uploadUrl, {
-					method: "POST",
-					headers: { "Content-Type": photo.type },
-					body: photo,
-				});
-				if (!response.ok)
-					throw new Error("Photo upload failed. Please try again.");
-				imageId = (await response.json()).storageId as Id<"_storage">;
-			}
-			await createItem({
-				commonName,
-				sku,
-				category,
-				location,
-				quantity: parsedQuantity,
-				lowThreshold: parsedThreshold,
-				imageId,
-			});
-			onClose();
-		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : "Could not add item.");
-		} finally {
-			setSaving(false);
-		}
-	}
-	return (
-		<ModalFrame
-			onClose={onClose}
-			subtitle="Give this part a home in your inventory."
-			title="Add a new item"
-		>
-			<form onSubmit={onSubmit}>
-				<div className="modal-body">
-					<div className="field-grid">
-						<label className="field field-full">
-							<span>
-								Common name <b>*</b>
-							</span>
-							<input
-								maxLength={120}
-								onChange={(event) => setCommonName(event.target.value)}
-								placeholder="e.g. Insulated ring terminal"
-								required
-								value={commonName}
-							/>
-						</label>
-						<label className="field">
-							<span>
-								SKU / part number <b>*</b>
-							</span>
-							<input
-								maxLength={80}
-								onChange={(event) => setSku(event.target.value)}
-								placeholder="e.g. RING-12-10"
-								required
-								value={sku}
-							/>
-						</label>
-						<label className="field">
-							<span>
-								Category <b>*</b>
-							</span>
-							<select
-								onChange={(event) =>
-									setCategory(event.target.value as Category)
-								}
-								value={category}
-							>
-								{CATEGORIES.map((value) => (
-									<option key={value} value={value}>
-										{value}
-									</option>
-								))}
-							</select>
-						</label>
-						<label className="field field-full">
-							<span>
-								Location <b>*</b>
-							</span>
-							<input
-								maxLength={120}
-								onChange={(event) => setLocation(event.target.value)}
-								placeholder="e.g. Shelf B · Bin 04"
-								required
-								value={location}
-							/>
-						</label>
-						<label className="field">
-							<span>
-								Starting quantity <b>*</b>
-							</span>
-							<input
-								min="0"
-								onChange={(event) => setQuantity(event.target.value)}
-								required
-								step="1"
-								type="number"
-								value={quantity}
-							/>
-						</label>
-						<label className="field">
-							<span>
-								Low-stock level <b>*</b>
-							</span>
-							<input
-								min="0"
-								onChange={(event) => setLowThreshold(event.target.value)}
-								required
-								step="1"
-								type="number"
-								value={lowThreshold}
-							/>
-						</label>
-					</div>
-					<label className="photo-field">
-						<span>
-							Part photo <em>OPTIONAL</em>
-						</span>
-						<span className="photo-drop">
-							{preview ? (
-								<>
-									{/* biome-ignore lint/performance/noImgElement: The preview uses a local blob URL before upload. */}
-									<img alt="Part preview" src={preview} />
-									<span>Change photo</span>
-								</>
-							) : (
-								<>
-									<Icon name="upload" size={23} />
-									<strong>Click to upload a photo</strong>
-									<small>JPG, PNG or WebP · up to 5 MB</small>
-								</>
-							)}
-						</span>
-						<input
-							accept="image/jpeg,image/png,image/webp"
-							onChange={(event) => {
-								const file = event.target.files?.[0];
-								if (!file) return;
-								if (
-									!["image/jpeg", "image/png", "image/webp"].includes(
-										file.type,
-									) ||
-									file.size > 5 * 1024 * 1024
-								) {
-									setError("Choose a JPG, PNG, or WebP photo up to 5 MB.");
-									event.target.value = "";
-									return;
-								}
-								setError("");
-								setPhoto(file);
-							}}
-							type="file"
-						/>
-					</label>
-					{error && (
-						<p className="form-error" role="alert">
-							{error}
-						</p>
-					)}
-				</div>
-				<div className="modal-footer">
-					<button className="secondary-button" onClick={onClose} type="button">
-						Cancel
-					</button>
-					<button className="primary-button" disabled={saving} type="submit">
-						{saving ? "Adding item…" : "Add item"}{" "}
-						<Icon name="arrow" size={16} />
-					</button>
-				</div>
-			</form>
-		</ModalFrame>
-	);
-}
+  function openNewItem() {
+    setEditingItem(null);
+    setDraft({ ...emptyDraft, category: categories[0] ?? "Other" });
+    setFormError("");
+    setIsFormOpen(true);
+  }
 
-function AdjustModal({ item, onClose }: { item: Item; onClose: () => void }) {
-	const adjustStock = useMutation(api.items.adjustStock);
-	const [direction, setDirection] = useState<"add" | "remove">("add");
-	const [amount, setAmount] = useState("1");
-	const [saving, setSaving] = useState(false);
-	const [error, setError] = useState("");
-	async function onSubmit(event: FormEvent<HTMLFormElement>) {
-		event.preventDefault();
-		setError("");
-		const parsed = Number(amount);
-		if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-			setError("Enter a positive whole number.");
-			return;
-		}
-		if (direction === "remove" && parsed > item.quantity) {
-			setError(`Only ${item.quantity} are currently in stock.`);
-			return;
-		}
-		setSaving(true);
-		try {
-			await adjustStock({
-				itemId: item._id,
-				amount: direction === "add" ? parsed : -parsed,
-			});
-			onClose();
-		} catch (cause) {
-			setError(
-				cause instanceof Error ? cause.message : "Could not update stock.",
-			);
-		} finally {
-			setSaving(false);
-		}
-	}
-	const parsed = Number(amount);
-	const newQuantity =
-		Number.isSafeInteger(parsed) && parsed > 0
-			? item.quantity + (direction === "add" ? parsed : -parsed)
-			: null;
-	return (
-		<ModalFrame
-			onClose={onClose}
-			subtitle={`${item.commonName} · ${item.sku}`}
-			title="Adjust stock"
-		>
-			<form onSubmit={onSubmit}>
-				<div className="modal-body">
-					<div className="stock-current">
-						<ItemImage item={item} small />
-						<div>
-							<span>Currently on hand</span>
-							<strong>{item.quantity.toLocaleString()} units</strong>
-						</div>
-					</div>
-					<div className="direction-toggle">
-						<button
-							className={direction === "add" ? "selected" : ""}
-							onClick={() => setDirection("add")}
-							type="button"
-						>
-							<Icon name="plus" size={17} /> Add stock
-						</button>
-						<button
-							className={direction === "remove" ? "selected" : ""}
-							onClick={() => setDirection("remove")}
-							type="button"
-						>
-							<Icon name="minus" size={17} /> Remove stock
-						</button>
-					</div>
-					<label className="field">
-						<span>
-							Amount <b>*</b>
-						</span>
-						<input
-							min="1"
-							onChange={(event) => setAmount(event.target.value)}
-							required
-							step="1"
-							type="number"
-							value={amount}
-						/>
-					</label>
-					<p className="adjust-hint">
-						New quantity:{" "}
-						<strong>
-							{newQuantity !== null && newQuantity >= 0
-								? newQuantity.toLocaleString()
-								: "—"}
-						</strong>
-					</p>
-					{error && (
-						<p className="form-error" role="alert">
-							{error}
-						</p>
-					)}
-				</div>
-				<div className="modal-footer">
-					<button className="secondary-button" onClick={onClose} type="button">
-						Cancel
-					</button>
-					<button className="primary-button" disabled={saving} type="submit">
-						{saving ? "Saving…" : "Update stock"}{" "}
-						<Icon name="arrow" size={16} />
-					</button>
-				</div>
-			</form>
-		</ModalFrame>
-	);
+  function openEditItem(item: InventoryItem) {
+    setEditingItem(item);
+    setDraft({
+      sku: item.sku,
+      name: item.name,
+      category: item.category,
+      unit: item.unit,
+      quantity: String(item.quantity),
+      minimumQuantity: String(item.minimumQuantity),
+      location: item.location,
+      supplier: item.supplier ?? "",
+    });
+    setFormError("");
+    setIsFormOpen(true);
+  }
+
+  function openCategoryManager() {
+    setEditingCategory(null);
+    setCategoryError("");
+    setIsCategoryManagerOpen(true);
+  }
+
+  async function addCategory(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCategoryError("");
+    setIsCategorySaving(true);
+    try {
+      await createCategory({ name: newCategoryName });
+      setNewCategoryName("");
+    } catch (error) {
+      setCategoryError(error instanceof Error ? error.message : "Could not add this category.");
+    } finally {
+      setIsCategorySaving(false);
+    }
+  }
+
+  async function saveCategory(category: InventoryCategory) {
+    setCategoryError("");
+    setIsCategorySaving(true);
+    try {
+      await renameCategory({ id: category._id, name: editedCategoryName });
+      if (categoryFilter === category.name) setCategoryFilter(editedCategoryName.trim());
+      setEditingCategory(null);
+    } catch (error) {
+      setCategoryError(error instanceof Error ? error.message : "Could not rename this category.");
+    } finally {
+      setIsCategorySaving(false);
+    }
+  }
+
+  async function deleteCategory(category: InventoryCategory) {
+    setCategoryError("");
+    setIsCategorySaving(true);
+    try {
+      await removeCategory({ id: category._id });
+      if (categoryFilter === category.name) setCategoryFilter("All supplies");
+    } catch (error) {
+      setCategoryError(error instanceof Error ? error.message : "Could not remove this category.");
+    } finally {
+      setIsCategorySaving(false);
+    }
+  }
+
+  async function saveItem(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFormError("");
+    const quantity = Number(draft.quantity);
+    const minimumQuantity = Number(draft.minimumQuantity);
+    if (!Number.isFinite(quantity) || quantity < 0 || !Number.isFinite(minimumQuantity) || minimumQuantity < 0) {
+      setFormError("Enter valid, non-negative stock quantities.");
+      return;
+    }
+
+    const supplier = draft.supplier.trim();
+    const itemData = {
+      sku: draft.sku,
+      name: draft.name,
+      category: draft.category,
+      unit: draft.unit,
+      quantity,
+      minimumQuantity,
+      location: draft.location,
+      ...(supplier ? { supplier } : {}),
+    };
+
+    setIsSaving(true);
+    try {
+      if (editingItem) {
+        await updateItem({ id: editingItem._id, ...itemData });
+        setNotice(`${draft.name.trim()} updated`);
+      } else {
+        await createItem(itemData);
+        setNotice(`${draft.name.trim()} added to inventory`);
+      }
+      setIsFormOpen(false);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Could not save this item.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function changeStock(item: InventoryItem, change: number) {
+    setNotice("");
+    try {
+      await adjustQuantity({ id: item._id, change });
+      setNotice(`${item.name}: stock ${change > 0 ? "received" : "issued"}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not update stock.");
+    }
+  }
+
+  async function deleteItem(item: InventoryItem) {
+    if (!window.confirm(`Remove ${item.name} (${item.sku}) from inventory?`)) return;
+    try {
+      await removeItem({ id: item._id });
+      setNotice(`${item.name} removed`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not remove this item.");
+    }
+  }
+
+  return (
+    <main className="stockroom-shell">
+      <header className="topbar">
+        <a className="brand" href="#inventory" aria-label="1241 Electrical Inventory Tracker home">
+          <Image alt="" className="brand-mark" height={38} priority src="/theory6-apps-logo.jpg" width={38} />
+          <span className="brand-copy"><strong>1241</strong><small>ELECTRICAL INVENTORY</small></span>
+        </a>
+        <div className="topbar-divider" />
+        <div className="workspace-label"><span className="workspace-dot" />Workshop inventory</div>
+        <div className="topbar-spacer" />
+        <span className="sync-indicator"><span />Live inventory</span>
+        <div aria-hidden="true" className="user-avatar">W</div>
+      </header>
+
+      <div className="workspace" id="inventory">
+        <aside className="sidebar">
+          <div className="sidebar-label">WORKSPACE</div>
+          <button className="nav-current" type="button">
+            <span className="nav-icon" aria-hidden="true">▦</span>
+            <span>Inventory</span>
+            <span className="nav-count">{inventory.length}</span>
+          </button>
+
+          <div className="sidebar-section-heading">
+            <span>SUPPLY CATEGORIES</span>
+            <button aria-label="Manage supply categories" className="category-manage-trigger" onClick={openCategoryManager} title="Manage supply categories" type="button">Edit</button>
+            <span className="sidebar-rule" />
+          </div>
+          <button
+            className={`category-link ${categoryFilter === "All supplies" ? "selected" : ""}`}
+            onClick={() => setCategoryFilter("All supplies")}
+            type="button"
+          >
+            <span className="category-dot all-dot" />All supplies<span className="category-count">{inventory.length}</span>
+          </button>
+          {categories.map((category, index) => (
+            <button
+              className={`category-link ${categoryFilter === category ? "selected" : ""}`}
+              key={category}
+              onClick={() => setCategoryFilter(categoryFilter === category ? "All supplies" : category)}
+              type="button"
+            >
+              <span className={`category-dot category-tone-${index}`} />
+              <span className="category-name">{category}</span>
+              <span className="category-count">{categoryCounts[category] ?? 0}</span>
+            </button>
+          ))}
+
+          <div className="sidebar-section-heading status-heading">
+            <span>STOCK STATUS</span>
+            <span className="sidebar-rule" />
+          </div>
+          <button
+            className={`status-link ${statusFilter === "low" ? "selected" : ""}`}
+            onClick={() => {
+              setActiveTab("reorder");
+              setStatusFilter(statusFilter === "low" ? "all" : "low");
+            }}
+            type="button"
+          >
+            <span className="status-dot low-dot" />Low stock<span className="category-count">{lowStockCount}</span>
+          </button>
+          <button
+            className={`status-link ${statusFilter === "out" ? "selected" : ""}`}
+            onClick={() => {
+              setActiveTab("reorder");
+              setStatusFilter(statusFilter === "out" ? "all" : "out");
+            }}
+            type="button"
+          >
+            <span className="status-dot out-dot" />Out of stock<span className="category-count">{outOfStockCount}</span>
+          </button>
+
+          <div className="sidebar-footnote">
+            <Image alt="" className="footnote-mark" height={27} src="/theory6-apps-logo.jpg" width={27} />
+            <span>Keep every connection<br />in good supply.</span>
+          </div>
+        </aside>
+
+        <section className="main-panel">
+          <div className="page-heading">
+            <div>
+              <div className="eyebrow"><span /> ELECTRICAL SUPPLIES</div>
+              <h1>{activeTab === "reorder" ? "Reorder list" : "Inventory"}</h1>
+              <p className="page-subtitle">{activeTab === "reorder" ? "Supplies at or below their minimum stock level." : "A clear view of what is on the shelf and what needs a restock."}</p>
+            </div>
+            <button className="primary-button" onClick={openNewItem} type="button">
+              <span aria-hidden="true">+</span> Add supply
+            </button>
+          </div>
+
+          <section aria-label="Inventory summary" className="metrics-row">
+            <div className="metric">
+              <span className="metric-label">ITEMS TRACKED</span>
+              <strong>{inventory.length.toLocaleString()}</strong>
+              <span className="metric-note">unique supply lines</span>
+            </div>
+            <div className="metric">
+              <span className="metric-label">UNITS ON HAND</span>
+              <strong>{totalUnits.toLocaleString()}</strong>
+              <span className="metric-note">across all supplies</span>
+            </div>
+            <div className="metric metric-alert">
+              <span className="metric-label">NEEDS ATTENTION</span>
+              <strong>{(lowStockCount + outOfStockCount).toLocaleString()}</strong>
+              <span className="metric-note">at or below minimum</span>
+            </div>
+          </section>
+
+          <div className="inventory-toolbar">
+            <div className="toolbar-title">
+              <h2>{activeTab === "reorder" ? "Supplies to reorder" : "Supply list"}</h2>
+              <span className="result-count">{filteredItems.length}</span>
+              <button className="category-toolbar-action" onClick={openCategoryManager} type="button">Manage categories</button>
+            </div>
+            <label className="search-field">
+              <span className="search-icon" aria-hidden="true" />
+              <input
+                aria-label="Search inventory"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search name, SKU, location..."
+                type="search"
+                value={search}
+              />
+              <kbd>/</kbd>
+            </label>
+            <div aria-label="Inventory views" className="inventory-tabs" role="tablist">
+              <button
+                aria-selected={activeTab === "inventory"}
+                className={activeTab === "inventory" ? "active" : ""}
+                aria-controls="inventory-panel"
+                id="inventory-tab"
+                onClick={() => { setActiveTab("inventory"); setStatusFilter("all"); }}
+                role="tab"
+                type="button"
+              >Inventory</button>
+              <button
+                aria-selected={activeTab === "reorder"}
+                className={activeTab === "reorder" ? "active" : ""}
+                aria-controls="reorder-panel"
+                id="reorder-tab"
+                onClick={() => { setActiveTab("reorder"); setStatusFilter("all"); }}
+                role="tab"
+                type="button"
+              >Reorder list<span className="tab-count">{reorderCount}</span></button>
+            </div>
+          </div>
+
+          {notice && <div className="notice" role="status">{notice}<button aria-label="Dismiss message" onClick={() => setNotice("")} type="button">×</button></div>}
+
+          <section
+            aria-labelledby={activeTab === "reorder" ? "reorder-tab" : "inventory-tab"}
+            className="table-frame"
+            id={activeTab === "reorder" ? "reorder-panel" : "inventory-panel"}
+            role="tabpanel"
+          >
+            <div className="table-scroll">
+              <table aria-labelledby={activeTab === "reorder" ? "reorder-tab" : "inventory-tab"} className="inventory-table">
+                <thead>
+                  <tr>
+                    <th className="item-column">SUPPLY</th>
+                    <th>SKU</th>
+                    {activeTab === "reorder" ? <>
+                      <th>ON HAND</th>
+                      <th>MINIMUM</th>
+                      <th>SUGGESTED QTY</th>
+                      <th>LOCATION / SUPPLIER</th>
+                    </> : <>
+                      <th>ON HAND</th>
+                      <th>STATUS</th>
+                      <th>LOCATION</th>
+                      <th>UPDATED</th>
+                    </>}
+                    <th><span className="visually-hidden">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items === undefined ? (
+                    <tr><td className="table-state" colSpan={7}><span className="loading-mark" />Connecting to stockroom...</td></tr>
+                  ) : filteredItems.length === 0 ? (
+                    <tr>
+                      <td className="table-state" colSpan={7}>
+                        <div className="empty-state">
+                          <span className="empty-mark" aria-hidden="true">⌁</span>
+                          <strong>{activeTab === "reorder" ? "Nothing needs reordering" : inventory.length === 0 ? "Your supply list starts here" : "No supplies match this view"}</strong>
+                          <span>{activeTab === "reorder" ? "Low- and out-of-stock supplies will appear here." : inventory.length === 0 ? "Add the electrical materials you keep on hand." : "Try another search or category."}</span>
+                          {activeTab === "inventory" && inventory.length === 0 && <button className="text-action" onClick={openNewItem} type="button">Add your first supply <span aria-hidden="true">→</span></button>}
+                        </div>
+                      </td>
+                    </tr>
+                  ) : filteredItems.map((item) => {
+                    const status = itemStatus(item);
+                    return (
+                      <tr key={item._id}>
+                        <td className="item-cell">
+                          <span className={`item-monogram monogram-${categories.indexOf(item.category) < 0 ? 6 : categories.indexOf(item.category)}`} aria-hidden="true">
+                            {item.name.slice(0, 1).toUpperCase()}
+                          </span>
+                          <span className="item-description">
+                            <strong>{item.name}</strong>
+                            <small>{item.category}</small>
+                          </span>
+                        </td>
+                        <td className="sku-cell">{item.sku}</td>
+                        {activeTab === "reorder" ? <>
+                          <td><span className={`stock-badge ${status}`}><span />{item.quantity.toLocaleString()} {item.unit}</span></td>
+                          <td className="reorder-minimum">{item.minimumQuantity.toLocaleString()} {item.unit}</td>
+                          <td><strong className="suggested-quantity">{Math.max(1, item.minimumQuantity - item.quantity).toLocaleString()} {item.unit}</strong></td>
+                          <td className="reorder-location"><strong>{item.location}</strong><span>{item.supplier || "Supplier not set"}</span></td>
+                        </> : <>
+                          <td>
+                            <div className="quantity-control">
+                              <button aria-label={`Issue one ${item.unit} of ${item.name}`} disabled={item.quantity <= 0} onClick={() => void changeStock(item, -1)} title="Issue one unit" type="button">−</button>
+                              <strong>{item.quantity.toLocaleString()}</strong>
+                              <span>{item.unit}</span>
+                              <button aria-label={`Receive one ${item.unit} of ${item.name}`} onClick={() => void changeStock(item, 1)} title="Receive one unit" type="button">+</button>
+                            </div>
+                          </td>
+                          <td><span className={`stock-badge ${status}`}><span />{status === "good" ? "In stock" : status === "low" ? "Low stock" : "Out of stock"}</span></td>
+                          <td className="location-cell">{item.location}</td>
+                          <td className="updated-cell">{formatUpdatedAt(item.updatedAt)}</td>
+                        </>}
+                        <td>
+                          <div className="row-actions">
+                            <button aria-label={`Edit ${item.name}`} onClick={() => openEditItem(item)} title="Edit item" type="button">Edit</button>
+                            <button aria-label={`Remove ${item.name}`} className="remove-action" onClick={() => void deleteItem(item)} title="Remove item" type="button">×</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <footer className="table-footer">
+              <span>Stock counts update as supplies are received or issued.</span>
+              <span><span className="footer-live-dot" /> Synced live</span>
+            </footer>
+          </section>
+
+          <div className="restock-strip">
+            <div className="restock-symbol" aria-hidden="true">!</div>
+            <div><strong>{outOfStockCount > 0 ? `${outOfStockCount} item${outOfStockCount === 1 ? "" : "s"} out of stock` : lowStockCount > 0 ? `${lowStockCount} item${lowStockCount === 1 ? "" : "s"} running low` : "Stock levels look good"}</strong><span>{outOfStockCount + lowStockCount > 0 ? "Review supplies at or below their minimum level." : "Items below their minimum level will appear here."}</span></div>
+            <button onClick={() => { setActiveTab("reorder"); setStatusFilter("all"); }} type="button">Open reorder list <span aria-hidden="true">→</span></button>
+          </div>
+        </section>
+      </div>
+
+      {isFormOpen && (
+        <div className="modal-backdrop">
+          <section
+            aria-labelledby="item-form-title"
+            aria-modal="true"
+            className="item-modal"
+            onKeyDown={(event) => { if (event.key === "Escape") setIsFormOpen(false); }}
+            role="dialog"
+            tabIndex={-1}
+          >
+            <div className="modal-heading">
+              <div><span className="modal-kicker">STOCKROOM RECORD</span><h2 id="item-form-title">{editingItem ? "Edit supply" : "Add a supply"}</h2></div>
+              <button aria-label="Close dialog" className="modal-close" onClick={() => setIsFormOpen(false)} type="button">×</button>
+            </div>
+            <form onSubmit={(event) => void saveItem(event)}>
+              <div className="form-grid">
+                <label className="form-field span-two"><span>Item name <i>*</i></span><input onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="e.g. THHN copper wire, 12 AWG" required value={draft.name} /></label>
+                <label className="form-field"><span>SKU / part number <i>*</i></span><input onChange={(event) => setDraft({ ...draft, sku: event.target.value })} placeholder="e.g. WIR-THHN-12-BLK" required value={draft.sku} /></label>
+                <label className="form-field"><span>Category <i>*</i></span><select onChange={(event) => setDraft({ ...draft, category: event.target.value })} value={draft.category}>{[...new Set([...categories, ...(draft.category && !categories.includes(draft.category) ? [draft.category] : [])])].map((category) => <option key={category}>{category}</option>)}</select></label>
+                <label className="form-field"><span>Quantity on hand <i>*</i></span><div className="number-with-unit"><input min="0" onChange={(event) => setDraft({ ...draft, quantity: event.target.value })} required step="any" type="number" value={draft.quantity} /><select aria-label="Stock unit" onChange={(event) => setDraft({ ...draft, unit: event.target.value })} value={draft.unit}>{units.map((unit) => <option key={unit}>{unit}</option>)}</select></div></label>
+                <label className="form-field"><span>Minimum stock <i>*</i></span><input min="0" onChange={(event) => setDraft({ ...draft, minimumQuantity: event.target.value })} required step="any" type="number" value={draft.minimumQuantity} /></label>
+                <label className="form-field"><span>Storage location <i>*</i></span><input onChange={(event) => setDraft({ ...draft, location: event.target.value })} placeholder="e.g. Aisle 2 · Bin 04" required value={draft.location} /></label>
+                <label className="form-field"><span>Supplier</span><input onChange={(event) => setDraft({ ...draft, supplier: event.target.value })} placeholder="Supplier name" value={draft.supplier} /></label>
+              </div>
+              {formError && <p className="form-error" role="alert">{formError}</p>}
+              <div className="modal-actions"><button className="cancel-button" onClick={() => setIsFormOpen(false)} type="button">Cancel</button><button className="primary-button" disabled={isSaving} type="submit">{isSaving ? "Saving..." : editingItem ? "Save changes" : "Add to inventory"}</button></div>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {isCategoryManagerOpen && (
+        <div className="modal-backdrop">
+          <section
+            aria-labelledby="category-manager-title"
+            aria-modal="true"
+            className="item-modal category-manager"
+            onKeyDown={(event) => { if (event.key === "Escape") setIsCategoryManagerOpen(false); }}
+            role="dialog"
+            tabIndex={-1}
+          >
+            <div className="modal-heading">
+              <div><span className="modal-kicker">INVENTORY SETTINGS</span><h2 id="category-manager-title">Supply categories</h2></div>
+              <button aria-label="Close category manager" className="modal-close" onClick={() => setIsCategoryManagerOpen(false)} type="button">×</button>
+            </div>
+            <p className="category-manager-copy">Renaming a category updates its supplies. Move supplies to another category before removing it.</p>
+            <div className="category-manager-list">
+              {categoryRecords === undefined ? <p className="category-manager-empty">Loading categories...</p> : categoryRecords.map((category) => {
+                const itemCount = categoryCounts[category.name] ?? 0;
+                const isEditing = editingCategory?._id === category._id;
+                return (
+                  <div className="category-manager-row" key={category._id}>
+                    {isEditing ? (
+                      <input
+                        aria-label={`Rename ${category.name}`}
+                        maxLength={40}
+                        onChange={(event) => setEditedCategoryName(event.target.value)}
+                        value={editedCategoryName}
+                      />
+                    ) : <strong>{category.name}</strong>}
+                    <span className="category-manager-count">{itemCount} {itemCount === 1 ? "supply" : "supplies"}</span>
+                    {isEditing ? (
+                      <>
+                        <button className="category-row-action" disabled={isCategorySaving} onClick={() => void saveCategory(category)} type="button">Save</button>
+                        <button className="category-row-action subtle" onClick={() => setEditingCategory(null)} type="button">Cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="category-row-action" onClick={() => { setEditingCategory(category); setEditedCategoryName(category.name); setCategoryError(""); }} type="button">Rename</button>
+                        <button
+                          aria-label={`Remove ${category.name}`}
+                          className="category-row-action subtle"
+                          disabled={isCategorySaving || itemCount > 0}
+                          onClick={() => void deleteCategory(category)}
+                          title={itemCount > 0 ? "Move supplies before removing this category" : "Remove category"}
+                          type="button"
+                        >Remove</button>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <form className="category-add-form" onSubmit={(event) => void addCategory(event)}>
+              <label className="form-field" htmlFor="new-category-name"><span>New category</span></label>
+              <div className="category-add-controls">
+                <input id="new-category-name" maxLength={40} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="e.g. Test equipment" required value={newCategoryName} />
+                <button className="primary-button" disabled={isCategorySaving} type="submit">Add</button>
+              </div>
+            </form>
+            {categoryError && <p className="form-error" role="alert">{categoryError}</p>}
+          </section>
+        </div>
+      )}
+    </main>
+  );
 }

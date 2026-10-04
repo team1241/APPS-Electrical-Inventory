@@ -10,10 +10,8 @@ import "./globals.css";
 import { RootProviders } from "@/components/providers/root-providers";
 
 export const metadata: Metadata = {
-	description:
-		"Track electrical parts, stock levels, and locations in one workspace.",
-	icons: { icon: "/icon.svg" },
-	title: "Volt Inventory",
+  description: "Track electrical supplies, stock levels, and restocks in one place.",
+  title: "1241 Electrical Inventory Tracker",
 };
 
 export default function RootLayout({
