@@ -6,6 +6,14 @@ import {
 import { mutation, query } from "./_generated/server";
 import { requireIdentity } from "./lib/auth";
 
+const weightUnitValidator = v.union(
+	v.literal("g"),
+	v.literal("kg"),
+	v.literal("oz"),
+	v.literal("lb"),
+);
+type WeightUnit = "g" | "kg" | "oz" | "lb";
+
 const itemValidator = v.object({
 	_id: v.id("inventoryItems"),
 	_creationTime: v.number(),
@@ -18,6 +26,9 @@ const itemValidator = v.object({
 	location: v.string(),
 	supplier: v.optional(v.string()),
 	orderUrl: v.optional(v.string()),
+	partWeight: v.optional(v.number()),
+	emptyContainerWeight: v.optional(v.number()),
+	weightUnit: v.optional(weightUnitValidator),
 	imageUrl: v.union(v.string(), v.null()),
 	updatedAt: v.number(),
 });
@@ -32,6 +43,9 @@ const itemFields = {
 	location: v.string(),
 	supplier: v.optional(v.string()),
 	orderUrl: v.optional(v.string()),
+	partWeight: v.optional(v.union(v.number(), v.null())),
+	emptyContainerWeight: v.optional(v.union(v.number(), v.null())),
+	weightUnit: v.optional(weightUnitValidator),
 };
 
 function normalizeSku(sku: string) {
@@ -78,6 +92,49 @@ function validateItem(args: {
 	}
 }
 
+function validateWeightSettings(args: {
+	partWeight?: number | null;
+	emptyContainerWeight?: number | null;
+	weightUnit?: WeightUnit;
+}): {
+	partWeight: number | undefined;
+	emptyContainerWeight: number | undefined;
+	weightUnit: WeightUnit | undefined;
+} {
+	const partWeight = args.partWeight ?? undefined;
+	const emptyContainerWeight = args.emptyContainerWeight ?? undefined;
+	if (
+		(partWeight === undefined) !== (emptyContainerWeight === undefined)
+	) {
+		throw new Error(
+			"Enter both the weight per part and the empty container weight.",
+		);
+	}
+	if (partWeight === undefined || emptyContainerWeight === undefined) {
+		return {
+			partWeight: undefined,
+			emptyContainerWeight: undefined,
+			weightUnit: undefined,
+		};
+	}
+	if (
+		!Number.isFinite(partWeight) ||
+		partWeight <= 0 ||
+		!Number.isFinite(emptyContainerWeight) ||
+		emptyContainerWeight < 0
+	) {
+		throw new Error(
+			"Part weight must be greater than zero and container weight cannot be negative.",
+		);
+	}
+	if (!args.weightUnit) throw new Error("Choose a weight unit.");
+	return {
+		partWeight,
+		emptyContainerWeight,
+		weightUnit: args.weightUnit,
+	};
+}
+
 export const list = query({
 	args: { paginationOpts: paginationOptsValidator },
 	returns: paginationResultValidator(itemValidator),
@@ -102,6 +159,15 @@ export const list = query({
 				location: item.location,
 				...(item.supplier !== undefined ? { supplier: item.supplier } : {}),
 				...(item.orderUrl !== undefined ? { orderUrl: item.orderUrl } : {}),
+				...(item.partWeight !== undefined
+					? { partWeight: item.partWeight }
+					: {}),
+				...(item.emptyContainerWeight !== undefined
+					? { emptyContainerWeight: item.emptyContainerWeight }
+					: {}),
+				...(item.weightUnit !== undefined
+					? { weightUnit: item.weightUnit }
+					: {}),
 				imageUrl: item.imageId ? await ctx.storage.getUrl(item.imageId) : null,
 				updatedAt: item.updatedAt,
 			}))),
@@ -128,8 +194,10 @@ export const create = mutation({
 			.first();
 		if (existing) throw new Error("That SKU is already in use.");
 
+		const weights = validateWeightSettings(args);
 		return await ctx.db.insert("inventoryItems", {
 			...args,
+			...weights,
 			sku,
 			name: args.name.trim(),
 			category: args.category.trim(),
@@ -165,8 +233,10 @@ export const update = mutation({
 			throw new Error("That SKU is already in use.");
 		}
 
+		const weights = validateWeightSettings(args);
 		await ctx.db.patch(id, {
 			...args,
+			...weights,
 			sku,
 			name: args.name.trim(),
 			category: args.category.trim(),
@@ -199,6 +269,37 @@ export const adjustQuantity = mutation({
 			throw new Error("Stock must remain a finite, non-negative quantity.");
 		await ctx.db.patch(id, { quantity, updatedAt: Date.now() });
 		return null;
+	},
+});
+
+export const setQuantityFromWeight = mutation({
+	args: { id: v.id("inventoryItems"), totalWeight: v.number() },
+	returns: v.number(),
+	handler: async (ctx, { id, totalWeight }) => {
+		await requireIdentity(ctx);
+		if (!Number.isFinite(totalWeight) || totalWeight < 0) {
+			throw new Error("Enter a valid, non-negative measured weight.");
+		}
+		const item = await ctx.db.get(id);
+		if (!item) throw new Error("Inventory item not found.");
+		if (
+			item.partWeight === undefined ||
+			item.emptyContainerWeight === undefined ||
+			item.weightUnit === undefined
+		) {
+			throw new Error("Add part and container weights before counting by weight.");
+		}
+		if (totalWeight < item.emptyContainerWeight) {
+			throw new Error("Measured weight cannot be less than the empty container.");
+		}
+		const quantity = Math.round(
+			(totalWeight - item.emptyContainerWeight) / item.partWeight,
+		);
+		if (!Number.isSafeInteger(quantity) || quantity < 0) {
+			throw new Error("The calculated quantity is too large.");
+		}
+		await ctx.db.patch(id, { quantity, updatedAt: Date.now() });
+		return quantity;
 	},
 });
 

@@ -33,6 +33,26 @@ test("supply dialog adds and edits a supply", async ({ page }) => {
   await expect(page.locator("tbody")).toContainText("Updated connector");
 });
 
+test("a scale reading calculates and applies the part quantity", async ({ page }) => {
+  await page.goto("/tests/ui/index.html");
+  await page.getByRole("button", { name: "Add supply", exact: true }).click();
+  const supplyDialog = page.getByRole("dialog");
+  await supplyDialog.getByLabel("Item name").fill("Test terminals");
+  await supplyDialog.getByLabel("SKU / part number").fill("TERM-01");
+  await supplyDialog.getByLabel("Quantity on hand").fill("0");
+  await supplyDialog.getByLabel("Storage location").fill("Test bin");
+  await supplyDialog.getByLabel("Weight per part").fill("5");
+  await supplyDialog.getByLabel("Empty container weight").fill("2");
+  await supplyDialog.getByRole("button", { name: "Add to inventory" }).click();
+
+  await page.getByRole("button", { name: "Count Test terminals by weight" }).click();
+  const countDialog = page.getByRole("dialog");
+  await countDialog.getByLabel("Measured container weight (g)").fill("102");
+  await expect(countDialog.getByText("20", { exact: true })).toBeVisible();
+  await countDialog.getByRole("button", { name: "Set quantity" }).click();
+  await expect(page.locator("tr", { hasText: "TERM-01" }).locator(".current-stock strong")).toHaveText("20");
+});
+
 test("category manager supports add, rename, and remove", async ({ page }, info) => {
   await page.goto("/tests/ui/index.html");
   await page.getByRole("button", { name: info.project.name === "mobile" ? "Manage categories" : "Manage supply categories", exact: true }).click();

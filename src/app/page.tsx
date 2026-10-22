@@ -31,6 +31,7 @@ const defaultCategories = [
 ];
 
 const units = ["each", "m", "ft", "roll", "box", "pack", "pair"];
+const weightUnits = ["g", "kg", "oz", "lb"] as const;
 
 type InventoryItem = FunctionReturnType<
 	typeof api.inventory.list
@@ -49,6 +50,9 @@ type ItemDraft = {
 	location: string;
 	supplier: string;
 	orderUrl: string;
+	partWeight: string;
+	emptyContainerWeight: string;
+	weightUnit: (typeof weightUnits)[number];
 };
 
 const emptyDraft: ItemDraft = {
@@ -61,6 +65,9 @@ const emptyDraft: ItemDraft = {
 	location: "",
 	supplier: "",
 	orderUrl: "",
+	partWeight: "",
+	emptyContainerWeight: "",
+	weightUnit: "g",
 };
 
 function itemStatus(item: InventoryItem) {
@@ -163,6 +170,9 @@ function Stockroom() {
 	const createItem = useMutation(api.inventory.create);
 	const updateItem = useMutation(api.inventory.update);
 	const removeItem = useMutation(api.inventory.remove);
+	const setQuantityFromWeight = useMutation(
+		api.inventory.setQuantityFromWeight,
+	);
 	const generateUploadUrl = useMutation(api.inventory.generateUploadUrl);
 	const setItemImage = useMutation(api.inventory.setImage);
 	const createCategory = useMutation(api.inventoryCategories.create);
@@ -201,6 +211,11 @@ function Stockroom() {
 	const [kioskSize, setKioskSize] = useState<"compact" | "standard" | "large">("standard");
 	const [photoFile, setPhotoFile] = useState<File | null>(null);
 	const [removePhoto, setRemovePhoto] = useState(false);
+	const [weightCountItem, setWeightCountItem] =
+		useState<InventoryItem | null>(null);
+	const [measuredWeight, setMeasuredWeight] = useState("");
+	const [weightCountError, setWeightCountError] = useState("");
+	const [isWeightCountSaving, setIsWeightCountSaving] = useState(false);
 	const categorySeedRequested = useRef(false);
 	useEffect(() => {
 		try {
@@ -249,6 +264,18 @@ function Stockroom() {
 		(item) => itemStatus(item) === "out",
 	).length;
 	const totalUnits = inventory.reduce((sum, item) => sum + item.quantity, 0);
+	const measuredWeightValue = Number(measuredWeight);
+	const weightCountPreview =
+		weightCountItem?.partWeight !== undefined &&
+		weightCountItem.emptyContainerWeight !== undefined &&
+		measuredWeight.trim() !== "" &&
+		Number.isFinite(measuredWeightValue) &&
+		measuredWeightValue >= weightCountItem.emptyContainerWeight
+			? Math.round(
+					(measuredWeightValue - weightCountItem.emptyContainerWeight) /
+						weightCountItem.partWeight,
+				)
+			: null;
 	const categoryCounts = inventory.reduce<Record<string, number>>(
 		(counts, item) => {
 			counts[item.category] = (counts[item.category] ?? 0) + 1;
@@ -355,11 +382,53 @@ function Stockroom() {
 			location: item.location,
 			supplier: item.supplier ?? "",
 			orderUrl: item.orderUrl ?? "",
+			partWeight: item.partWeight === undefined ? "" : String(item.partWeight),
+			emptyContainerWeight:
+				item.emptyContainerWeight === undefined
+					? ""
+					: String(item.emptyContainerWeight),
+			weightUnit: item.weightUnit ?? "g",
 		});
 		setFormError("");
 		setPhotoFile(null);
 		setRemovePhoto(false);
 		setIsFormOpen(true);
+	}
+
+	function openWeightCount(item: InventoryItem) {
+		setWeightCountItem(item);
+		setMeasuredWeight("");
+		setWeightCountError("");
+	}
+
+	async function applyWeightCount(event: React.FormEvent<HTMLFormElement>) {
+		event.preventDefault();
+		if (!weightCountItem) return;
+		const totalWeight = Number(measuredWeight);
+		if (!Number.isFinite(totalWeight) || totalWeight < 0) {
+			setWeightCountError("Enter a valid, non-negative measured weight.");
+			return;
+		}
+		setWeightCountError("");
+		setIsWeightCountSaving(true);
+		try {
+			const quantity = await setQuantityFromWeight({
+				id: weightCountItem._id,
+				totalWeight,
+			});
+			setNotice(
+				`${weightCountItem.name}: quantity updated to ${quantity.toLocaleString()}`,
+			);
+			setWeightCountItem(null);
+		} catch (error) {
+			setWeightCountError(
+				error instanceof Error
+					? error.message
+					: "Could not calculate the quantity.",
+			);
+		} finally {
+			setIsWeightCountSaving(false);
+		}
 	}
 
 	function openCategoryManager() {
@@ -427,6 +496,12 @@ function Stockroom() {
 		setFormError("");
 		const quantity = Number(draft.quantity);
 		const minimumQuantity = Number(draft.minimumQuantity);
+		const hasPartWeight = draft.partWeight.trim() !== "";
+		const hasContainerWeight = draft.emptyContainerWeight.trim() !== "";
+		const partWeight = hasPartWeight ? Number(draft.partWeight) : null;
+		const emptyContainerWeight = hasContainerWeight
+			? Number(draft.emptyContainerWeight)
+			: null;
 		if (
 			!Number.isFinite(quantity) ||
 			quantity < 0 ||
@@ -434,6 +509,24 @@ function Stockroom() {
 			minimumQuantity < 0
 		) {
 			setFormError("Enter valid, non-negative stock quantities.");
+			return;
+		}
+		if (hasPartWeight !== hasContainerWeight) {
+			setFormError(
+				"Enter both the weight per part and the empty container weight.",
+			);
+			return;
+		}
+		if (
+			hasPartWeight &&
+			(!Number.isFinite(partWeight) ||
+				(partWeight ?? 0) <= 0 ||
+				!Number.isFinite(emptyContainerWeight) ||
+				(emptyContainerWeight ?? -1) < 0)
+		) {
+			setFormError(
+				"Part weight must be greater than zero and container weight cannot be negative.",
+			);
 			return;
 		}
 
@@ -455,6 +548,9 @@ function Stockroom() {
 			minimumQuantity,
 			location: draft.location,
 			orderUrl: draft.orderUrl.trim(),
+			partWeight,
+			emptyContainerWeight,
+			...(hasPartWeight ? { weightUnit: draft.weightUnit } : {}),
 			...(supplier ? { supplier } : {}),
 		};
 
@@ -830,7 +926,7 @@ function Stockroom() {
 									<button className="kiosk-item-identity item-edit-target" type="button" aria-label={`Edit ${item.name}`} title="Click to edit supply" onClick={() => openEditItem(item)}>{item.imageUrl ? <Image unoptimized className="supply-photo kiosk-photo" alt="" src={item.imageUrl} width={88} height={88} /> : <span className="item-monogram" style={categoryTint(categoryColor(item.category))} aria-hidden="true">{item.name.slice(0, 1).toUpperCase()}</span>}<span><strong className="kiosk-item-title">{item.name}</strong><span className="kiosk-item-meta">{item.sku} · {item.location}</span></span></button>
 									<div className="kiosk-stock"><strong>{item.quantity.toLocaleString()}</strong><span>{item.unit} on hand</span><small>Minimum {item.minimumQuantity.toLocaleString()}</small></div>
 									<InlineStockControls item={item} kiosk onNotice={setNotice} />
-									{item.orderUrl && <div className="kiosk-card-footer"><a className="order-link" href={item.orderUrl} target="_blank" rel="noopener noreferrer">Order supply ↗</a></div>}
+									{(item.partWeight !== undefined || item.orderUrl) && <div className="kiosk-card-footer">{item.partWeight !== undefined && <button className="weight-count-button" type="button" onClick={() => openWeightCount(item)}>Count by weight</button>}{item.orderUrl && <a className="order-link" href={item.orderUrl} target="_blank" rel="noopener noreferrer">Order supply ↗</a>}</div>}
 								</article>;
 							})}
 						</div> : <div className="table-scroll">
@@ -981,6 +1077,16 @@ function Stockroom() {
 													)}
 													<td>
 														<div className="row-actions">
+													{item.partWeight !== undefined && (
+														<button
+															aria-label={`Count ${item.name} by weight`}
+															className="weight-count-button"
+															onClick={() => openWeightCount(item)}
+															type="button"
+														>
+															Count
+														</button>
+													)}
 															{item.orderUrl && <a className="order-link" href={item.orderUrl} target="_blank" rel="noopener noreferrer" aria-label={`Order ${item.name}`}>Order ↗</a>}
 															<button
 																aria-label={`Edit ${item.name}`}
@@ -1168,6 +1274,54 @@ function Stockroom() {
 								/>
 							</label>
 							<label className="form-field">
+								<span>Weight per part <small>Optional</small></span>
+								<div className="number-with-unit">
+									<input
+										min="0"
+										onChange={(event) =>
+											setDraft({ ...draft, partWeight: event.target.value })
+										}
+										placeholder="e.g. 4.2"
+										step="any"
+										type="number"
+										value={draft.partWeight}
+									/>
+									<select
+										aria-label="Weight unit"
+										onChange={(event) =>
+											setDraft({
+												...draft,
+												weightUnit: event.target.value as ItemDraft["weightUnit"],
+											})
+										}
+										value={draft.weightUnit}
+									>
+										{weightUnits.map((unit) => (
+											<option key={unit}>{unit}</option>
+										))}
+									</select>
+								</div>
+							</label>
+							<label className="form-field">
+								<span>Empty container weight <small>Optional</small></span>
+								<input
+									min="0"
+									onChange={(event) =>
+										setDraft({
+											...draft,
+											emptyContainerWeight: event.target.value,
+										})
+									}
+									placeholder={`Same unit (${draft.weightUnit})`}
+									step="any"
+									type="number"
+									value={draft.emptyContainerWeight}
+								/>
+							</label>
+							<p className="weight-field-hint span-two">
+								Add both weights to count parts from a scale reading later.
+							</p>
+							<label className="form-field">
 								<span>
 									Storage location <i>*</i>
 								</span>
@@ -1225,6 +1379,91 @@ function Stockroom() {
 									: editingItem
 										? "Save changes"
 										: "Add to inventory"}
+							</button>
+						</div>
+					</form>
+				</InventoryDialog>
+			)}
+
+			{weightCountItem && (
+				<InventoryDialog
+					className="weight-count-dialog"
+					onClose={() => setWeightCountItem(null)}
+					titleId="weight-count-title"
+				>
+					<div className="modal-heading">
+						<div>
+							<span className="modal-kicker">SCALE COUNT</span>
+							<h2 id="weight-count-title">Count {weightCountItem.name}</h2>
+						</div>
+						<button
+							aria-label="Close weight counter"
+							className="modal-close"
+							onClick={() => setWeightCountItem(null)}
+							type="button"
+						>
+							×
+						</button>
+					</div>
+					<div className="weight-settings-summary">
+						<span>
+							<strong>{weightCountItem.partWeight}</strong>{" "}
+							{weightCountItem.weightUnit} per part
+						</span>
+						<span aria-hidden="true">−</span>
+						<span>
+							<strong>{weightCountItem.emptyContainerWeight}</strong>{" "}
+							{weightCountItem.weightUnit} empty container
+						</span>
+					</div>
+					<form onSubmit={(event) => void applyWeightCount(event)}>
+						<label className="form-field">
+							<span>
+								Measured container weight ({weightCountItem.weightUnit}) <i>*</i>
+							</span>
+							<input
+								min="0"
+								onChange={(event) => setMeasuredWeight(event.target.value)}
+								placeholder="Place the filled container on the scale"
+								required
+								step="any"
+								type="number"
+								value={measuredWeight}
+							/>
+						</label>
+						<div className="weight-count-result" aria-live="polite">
+							<span className="weight-count-label">Calculated quantity</span>
+							<strong>
+								{weightCountPreview !== null &&
+								Number.isSafeInteger(weightCountPreview)
+									? weightCountPreview.toLocaleString()
+									: "—"}
+							</strong>
+							<small>parts, rounded to the nearest whole number</small>
+						</div>
+						{weightCountError && (
+							<p className="form-error" role="alert">
+								{weightCountError}
+							</p>
+						)}
+						<div className="modal-actions">
+							<button
+								className="cancel-button"
+								onClick={() => setWeightCountItem(null)}
+								type="button"
+							>
+								Cancel
+							</button>
+							<button
+								className="primary-button"
+								disabled={
+									isWeightCountSaving ||
+									weightCountPreview === null ||
+									!Number.isSafeInteger(weightCountPreview)
+								}
+								type="submit"
+							>
+								{isWeightCountSaving ? "Updating..." : "Set quantity"}
 							</button>
 						</div>
 					</form>

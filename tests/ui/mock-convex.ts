@@ -12,6 +12,9 @@ type Item = {
 	location: string;
 	supplier?: string;
 	orderUrl?: string;
+	partWeight?: number;
+	emptyContainerWeight?: number;
+	weightUnit?: "g" | "kg" | "oz" | "lb";
 	updatedAt: number;
 };
 let items: Item[] = [
@@ -108,6 +111,20 @@ export function useMutation(ref: FunctionReference<"mutation">) {
 					? { ...item, quantity: item.quantity + Number(args.change) }
 					: item,
 			);
+		if (name === "inventory:setQuantityFromWeight") {
+			const item = items.find((candidate) => candidate._id === args.id);
+			if (!item?.partWeight || item.emptyContainerWeight === undefined)
+				throw new Error("Add part and container weights before counting by weight.");
+			const quantity = Math.round(
+				(Number(args.totalWeight) - item.emptyContainerWeight) / item.partWeight,
+			);
+			items = items.map((candidate) =>
+				candidate._id === args.id ? { ...candidate, quantity } : candidate,
+			);
+			paginationStatus = "Exhausted";
+			update();
+			return quantity;
+		}
 		if (name === "inventory:remove")
 			items = items.filter((item) => item._id !== args.id);
 		if (name === "inventory:setImage")

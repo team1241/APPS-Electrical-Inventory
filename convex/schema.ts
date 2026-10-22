@@ -25,6 +25,16 @@ export default defineSchema({
 		orderUrl: v.optional(v.string()),
 		imageId: v.optional(v.id("_storage")),
 		costPerUnit: v.optional(v.number()),
+		partWeight: v.optional(v.number()),
+		emptyContainerWeight: v.optional(v.number()),
+		weightUnit: v.optional(
+			v.union(
+				v.literal("g"),
+				v.literal("kg"),
+				v.literal("oz"),
+				v.literal("lb"),
+			),
+		),
 		updatedAt: v.number(),
 	})
 		.index("by_sku", ["sku"])

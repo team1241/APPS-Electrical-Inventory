@@ -44,6 +44,12 @@ test("signed-out callers cannot read or change shared stock or categories", asyn
 	await expect(
 		t.mutation(api.inventory.adjustQuantity, { id, change: 1 }),
 	).rejects.toThrow("Sign in");
+	await expect(
+		t.mutation(api.inventory.setQuantityFromWeight, {
+			id,
+			totalWeight: 10,
+		}),
+	).rejects.toThrow("Sign in");
 	await expect(t.mutation(api.inventory.remove, { id })).rejects.toThrow(
 		"Sign in",
 	);
@@ -118,6 +124,52 @@ test("stock adjustments preserve fractional units and reject invalid quantities"
 	expect((await member.query(api.inventory.list, page)).page[0].quantity).toBe(
 		3,
 	);
+});
+
+test("container weight calculates and saves a whole-part quantity", async () => {
+	const { member } = setup();
+	const id = await member.mutation(api.inventory.create, {
+		...sample,
+		partWeight: 5,
+		emptyContainerWeight: 2,
+		weightUnit: "g",
+	});
+	expect(
+		await member.mutation(api.inventory.setQuantityFromWeight, {
+			id,
+			totalWeight: 104,
+		}),
+	).toBe(20);
+	expect((await member.query(api.inventory.list, page)).page[0]).toMatchObject({
+		quantity: 20,
+		partWeight: 5,
+		emptyContainerWeight: 2,
+		weightUnit: "g",
+	});
+	await expect(
+		member.mutation(api.inventory.setQuantityFromWeight, {
+			id,
+			totalWeight: 1,
+		}),
+	).rejects.toThrow("less than the empty container");
+});
+
+test("weight settings must be complete and physically valid", async () => {
+	const { member } = setup();
+	await expect(
+		member.mutation(api.inventory.create, {
+			...sample,
+			partWeight: 5,
+		}),
+	).rejects.toThrow("both the weight per part");
+	await expect(
+		member.mutation(api.inventory.create, {
+			...sample,
+			partWeight: 0,
+			emptyContainerWeight: 2,
+			weightUnit: "g",
+		}),
+	).rejects.toThrow("greater than zero");
 });
 
 test("pagination reaches supplies beyond the previous 500-item cutoff", async () => {
